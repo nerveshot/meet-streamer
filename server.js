@@ -437,28 +437,28 @@ async function startMeetBot() {
     const executablePath = getChromeExecutablePath();
     log('INFO', `🔧 [Chrome Binary] Using executable path: ${executablePath || 'Puppeteer bundled'}`);
 
+    const chromeArgs = [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--no-first-run',
+      '--disable-accelerated-2d-canvas',
+      '--disable-extensions',
+      '--ignore-certificate-errors',
+      '--use-fake-ui-for-media-stream',
+      '--use-fake-device-for-media-stream',
+      '--enable-usermedia-screen-capturing',
+      '--auto-select-desktop-capture-source=Kabila',
+      '--window-size=1280,720',
+      '--disable-blink-features=AutomationControlled',
+      '--disable-features=IsolateOrigins,site-per-process'
+    ];
+
     activeBrowser = await puppeteer.launch({
       headless: 'new',
       executablePath: executablePath,
-      ignoreHTTPSErrors: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--no-first-run',
-        '--no-zygote',
-        '--single-process',
-        '--disable-accelerated-2d-canvas',
-        '--disable-extensions',
-        '--use-fake-ui-for-media-stream',
-        '--use-fake-device-for-media-stream',
-        '--enable-usermedia-screen-capturing',
-        '--auto-select-desktop-capture-source=Kabila',
-        '--window-size=1280,720',
-        '--disable-blink-features=AutomationControlled',
-        '--disable-features=IsolateOrigins,site-per-process'
-      ]
+      args: chromeArgs
     });
 
     const page = await activeBrowser.newPage();
