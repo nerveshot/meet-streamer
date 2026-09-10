@@ -501,6 +501,26 @@ async function startMeetBot() {
     const context = activeBrowser.defaultBrowserContext();
     await context.overridePermissions('https://meet.google.com', ['camera', 'microphone', 'notifications']);
 
+    // Load authenticated Google cookies if provided in environment
+    if (process.env.GOOGLE_COOKIES) {
+      try {
+        let rawCookies = process.env.GOOGLE_COOKIES.trim();
+        if (!rawCookies.startsWith('[') && !rawCookies.startsWith('{')) {
+          try {
+            rawCookies = Buffer.from(rawCookies, 'base64').toString('utf-8');
+          } catch (e) {}
+        }
+        const cookies = JSON.parse(rawCookies);
+        const cookieArray = Array.isArray(cookies) ? cookies : [cookies];
+        if (cookieArray.length > 0) {
+          await page.setCookie(...cookieArray);
+          log('SUCCESS', `🔑 [Auth] Successfully injected ${cookieArray.length} Google account cookies!`);
+        }
+      } catch (err) {
+        log('WARN', `⚠️ [Auth] Could not parse GOOGLE_COOKIES: ${err.message}`);
+      }
+    }
+
     botStatus.state = 'NAVIGATING';
     log('INFO', `🌐 [Kabila Bot] Connecting to Google Meet: ${MEET_URL}`);
     await page.goto(MEET_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -514,7 +534,17 @@ async function startMeetBot() {
 
     // Check if Google forced a sign-in redirect
     if (botStatus.currentUrl.includes('accounts.google.com')) {
-      throw new Error('Google Meet requires Google Sign-In for this call or from this IP. Guest access was blocked.');
+      throw new Error('Google Meet requires Google Sign-In for this call or from this IP. Guest access was blocked. Provide GOOGLE_COOKIES in Render.');
+    }
+
+    // Check if Google Meet rejected entry with "You can't join this video call"
+    const initialPageText = await page.evaluate(() => document.body.innerText || '');
+    if (
+      initialPageText.includes("You can't join this video call") ||
+      initialPageText.includes("You aren't allowed to join") ||
+      initialPageText.includes("can't join this call")
+    ) {
+      throw new Error("Google Meet blocked entry: 'You can't join this video call'. Solution: Set Google Meet Host controls access to 'Open' OR add GOOGLE_COOKIES in Render environment variables.");
     }
 
     // Dismiss any "Got it" / "Allow microphone and camera" modal prompts
