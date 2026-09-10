@@ -1,6 +1,7 @@
 const express = require('express');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const fs = require('fs');
 
 puppeteer.use(StealthPlugin());
 
@@ -25,6 +26,22 @@ function log(level, message) {
 
   const icon = level === 'ERROR' ? '❌' : level === 'WARN' ? '⚠️' : level === 'SUCCESS' ? '✅' : 'ℹ️';
   console.log(`[${time}] ${icon} ${message}`);
+}
+
+function getChromeExecutablePath() {
+  if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
+    return process.env.PUPPETEER_EXECUTABLE_PATH;
+  }
+  const possiblePaths = [
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/google-chrome',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser'
+  ];
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) return p;
+  }
+  return undefined;
 }
 
 let botStatus = {
@@ -82,7 +99,7 @@ app.post('/api/restart', async (req, res) => {
   res.json({ success: true, message: 'Bot restart triggered.' });
 });
 
-// Health check & Rich Visual Dashboard at '/'
+// Health check & Visual Dashboard at '/'
 app.get('/', (req, res) => {
   if (req.headers.accept && req.headers.accept.includes('application/json') && !req.query.view) {
     return res.json({
@@ -412,14 +429,17 @@ async function startMeetBot() {
   botStatus.isStreaming = false;
   botStatus.joinedAt = null;
 
-  log('INFO', '🚀 [Kabila Bot] Initializing Headless Chromium Streamer...');
+  log('INFO', '🚀 [Kabila Bot] Initializing Headless Google Chrome Streamer...');
 
   try {
     await safeCloseBrowser();
 
+    const executablePath = getChromeExecutablePath();
+    log('INFO', `🔧 [Chrome Binary] Using executable path: ${executablePath || 'Puppeteer bundled'}`);
+
     activeBrowser = await puppeteer.launch({
       headless: 'new',
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
+      executablePath: executablePath,
       ignoreHTTPSErrors: true,
       args: [
         '--no-sandbox',
@@ -444,9 +464,38 @@ async function startMeetBot() {
     const page = await activeBrowser.newPage();
     activePage = page;
     await page.setViewport({ width: 1280, height: 720 });
-    await page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
-    );
+
+    // Set real, modern Chrome User-Agent
+    const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+    await page.setUserAgent(userAgent);
+
+    // Provide complete navigator spoofing so Google Meet detects a fully supported modern browser
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+      Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+      Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+
+      if (navigator.userAgentData) {
+        Object.defineProperty(navigator, 'userAgentData', {
+          get: () => ({
+            brands: [
+              { brand: 'Google Chrome', version: '131' },
+              { brand: 'Chromium', version: '131' },
+              { brand: 'Not_A Brand', version: '24' }
+            ],
+            mobile: false,
+            platform: 'Windows'
+          })
+        });
+      }
+
+      window.chrome = {
+        runtime: {},
+        loadTimes: function() {},
+        csi: function() {},
+        app: {}
+      };
+    });
 
     // Grant camera, mic, and notification permissions
     const context = activeBrowser.defaultBrowserContext();
@@ -456,7 +505,7 @@ async function startMeetBot() {
     log('INFO', `🌐 [Kabila Bot] Connecting to Google Meet: ${MEET_URL}`);
     await page.goto(MEET_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-    // Wait for Google Meet to settle and load bundles
+    // Wait for Google Meet scripts to finish initializing
     await sleep(6000);
 
     botStatus.currentUrl = page.url();
@@ -594,7 +643,6 @@ async function startMeetBot() {
 
     if (!joinClicked) {
       log('WARN', '⚠️ [Kabila Bot] Join button was not clickable or not enabled. Check the screenshot on dashboard.');
-      // Extract page body text for diagnostic logging
       const pageSnippets = await page.evaluate(() => {
         return document.body.innerText.replace(/\\s+/g, ' ').slice(0, 300);
       });
